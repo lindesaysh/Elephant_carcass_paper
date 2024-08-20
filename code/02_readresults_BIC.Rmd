@@ -1,0 +1,907 @@
+---
+title: "MRSea based Results (BIC)"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE, comment='')
+```
+
+## MRSea CReSs-SALSA results:
+
+Modelling using BIC for knot selection and ultimately model selection. 
+
+```{r cars}
+load(file = '../results/cressmrsea11062121_pp1.RData')
+Routputs_a<-Routputs
+load(file = '../results/cressmrsea11062121_pp2.RData')
+Routputs_b<-Routputs
+Routputs<- c(Routputs_a, Routputs_b)
+
+analysisdat<-read.csv(file='../data/analysisdat.csv')
+require(rgdal)
+proj4string = CRS("+proj=utm +zone=33 +units=km")
+```
+
+```{r}
+dim(analysisdat)
+```
+
+```{r}
+require(dplyr)
+res1 = data.frame(t(sapply(Routputs, '[[','res')))
+typedf<-data.frame(type.num=c(1:4), type=c('EucE', 'EucG', 'GeoE', 'GeoG'))
+
+fulldat<- res1
+fulldat$index<-1:nrow(fulldat)
+fulldat$StartKnots<-as.numeric(fulldat$StartKnots)
+fulldat$type<-as.character(fulldat$type)
+#fulldat$type.fac<-as.character(fulldat$type)
+fulldat$noKnots<-as.numeric(fulldat$noKnots)
+fulldat$ll<-as.numeric(fulldat$ll)
+#fulldat$medianCVScore<-as.numeric(fulldat$medianCVScore)
+#fulldat$LCL<-as.numeric(fulldat$LCL)
+#fulldat$UCL<-as.numeric(fulldat$UCL)
+fulldat$AICc<-as.numeric(fulldat$AICc)
+fulldat$BIC<-as.numeric(fulldat$BIC)
+fulldat$timing_min<-as.numeric(fulldat$timing_min)
+fulldat <- left_join(typedf, fulldat)
+# 
+# 
+# #res2 = sapply(Routputs, '[[','res', simplify='array')
+# 
+ splistall = sapply(Routputs, '[[','splist')
+
+```
+
+```{r}
+fulldat <- fulldat %>% mutate(mybic = (-2*ll) + (log(nrow(analysisdat)) * noKnots)) 
+```
+
+```{r}
+library(viridis)
+ggplot(fulldat, aes(x=StartKnots, y=noKnots)) +
+  geom_point(aes(colour=type, group=type, shape=type)) + 
+  geom_abline() + geom_line(aes(colour=type, group=type)) + 
+  xlab('Starting Knot Number') + ylab('Chosen Number of Knots') +
+  theme_bw() + coord_equal() +
+   scale_color_viridis(discrete=TRUE) 
+```
+
+```{r}
+ggplot(fulldat, aes(x=StartKnots, y=timing_min)) +
+  geom_point(aes(colour=type, group=type, shape=type))  + geom_line(aes(colour=type, group=type)) + 
+  xlab('Starting Knot Number') + ylab('Time (min)') +
+  theme_bw() +
+   scale_color_viridis(discrete=TRUE) 
+```
+
+```{r}
+fulldat %>% group_by(type) %>% 
+  summarise(meantime=mean(timing_min), 
+            maxtime=max(timing_min), 
+            totaltime=sum(timing_min)/60)
+```
+
+
+```{r}
+waterh<-readOGR( dsn="C:\\Users\\lass\\OneDrive - University of St Andrews\\papers\\papers\\CarcassSALSApaper\\August2020\\data\\shapefiles",  layer="functional water", verbose = FALSE)
+proj4string(waterh) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+waterholes <- spTransform(waterh, CRS("+proj=utm +zone=33 ellps=WGS84"))
+waterholelocs<-data.frame(waterholes@coords)/1000
+```
+
+```{r}
+rawplot <- ggplot() +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+ scale_shape(guide=FALSE)+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + 
+geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='firebrick', size=0.3, alpha=0.5) +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), size=1, alpha=0.2) + 
+   geom_point(data=waterholelocs, aes(coords.x1, coords.x2), colour = 'blue',shape=4, alpha=1/2) +
+geom_polygon(data=fence, aes(x=x.pos, y=y.pos), fill=NA, colour='black')  
+  
+#geom_point(data=waterholelocs,aes(x=coords.x1, y=coords.x2), colour='blue', shape=1)
+png('../results/rawdataplot.png', height=900, width=2000, res=300)
+rawplot 
+dev.off()
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+plot(fulldat$StartKnots, fulldat$noKnots, asp=1)
+abline(0,1)
+
+require(fields)
+quilt.plot(fulldat$StartKnots, fulldat$noKnots, fulldat$ll, asp=1)
+```
+
+
+
+```{r, fig.cap="Figure showing how the negative log-likelihood score changes by method and by number of starting knots."}
+require(ggplot2)
+ggplot(fulldat) + 
+   geom_line(aes(x=StartKnots, y=-ll, group=type, colour=type)) + 
+  theme_bw() + 
+  ylab('Negative Log Likelihood')
+```
+
+```{r, fig.cap="Figure showing how the negative log-likelihood score changes by method and by number of knots chosen."}
+ggplot(fulldat) + 
+  geom_line(aes(x=noKnots, y=-ll, colour=type, group=type)) + 
+  theme_bw() +
+  ylab('Negative Log Likelihood')
+```
+
+```{r, fig.cap="Figure showing how BIC score changes by method and by number of knots chosen."}
+ggplot(fulldat) + 
+  geom_line(aes(x=noKnots, y=BIC, colour=type, group=type)) +
+  theme_bw()
+```
+
+```{r, fig.cap="Figure showing how AICc score changes by method and by number of knots chosen."}
+ggplot(fulldat) + 
+  geom_line(aes(x=noKnots, y=AICc, colour=type, group=type)) + 
+  theme_bw()
+```
+
+## Best Model
+
+Euclidean Exponential Model. Starting at 40 knots, finishing with 28.
+
+```{r}
+require(MRSea)
+modid<-arrange(fulldat, desc(ll))$index[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+```
+
+```{r}
+basis_ll<- LRF.e(radiusIndices = splistall[[modid]]$radiusIndices, dists = splistall[[modid]]$dist, radii = splistall[[modid]]$radii, aR = splistall[[modid]]$knotPos)
+mymodll<- gamMRSea(response/pp.wts ~ basis_ll , family='poisson', data=analysisdat, weights=pp.wts)
+mymodll$splineParams[[1]]<-splistall[[modid]]
+```
+
+```{r}
+summary(mymodll)
+```
+
+```{r}
+analysisdat$fitsll<-fitted(mymodll)
+```
+
+
+```{r}
+require(splancs)
+largepan<-read.csv('../data/largepan.csv')[,2:3]/1000
+fence<-read.csv('../data/fencepoly.csv')/1000
+knotgrid<-mymodll$splineParams[[1]]$knotgrid
+polymap(fence)
+polymap(largepan, add=TRUE)
+points(analysisdat$x.pos[analysisdat$response==1], analysisdat$y.pos[analysisdat$response==1], pch=20, col='grey')
+points(knotgrid[mymodll$splineParams[[1]]$knotPos,1], knotgrid[mymodll$splineParams[[1]]$knotPos,2],cex=mymodll$splineParams[[1]]$radiusIndices, col='blue')
+```
+
+```{r}
+plotknots<-knotgrid[mymodll$splineParams[[1]]$knotPos,]
+plotknots$coefsign<-as.factor(ifelse(coef(mymodll)[-1]<0, 0, 1))
+plotknots$radii<-mymodll$splineParams[[1]]$radii[mymodll$splineParams[[1]]$radiusIndices]/100
+
+modknots<-ggplot() +
+  geom_point(data=plotknots,
+             aes(x=x.pos, y=y.pos,colour=coefsign, size=radii), alpha=1/2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), alpha=1/5, size=0.5) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_polygon(data=fence, aes(x=x.pos, y=y.pos), fill=NA, colour='black') +
+  scale_size(guide=FALSE) +
+  scale_color_viridis(discrete=TRUE) +
+  guides(colour="none") 
+  
+png('../results/salsaknots.png', height=900, width=1500, res=300)
+modknots
+dev.off()
+```
+
+
+
+
+```{r, fig.cap='Fitted values for the best log likelhood model.'}
+quilt.plot(analysisdat$x.pos[analysisdat$response==0], analysisdat$y.pos[analysisdat$response==0], analysisdat$fitsll[analysisdat$response==0], nrow=170, ncol=77)
+```
+
+```{r}
+# predgrid<-read.csv(file='data/predgrid.csv')
+# load('data/pred2knotDist.Robj') # object called p2k
+# # remove duplicated knots
+# p2k<-p2k[,-which(duplicated(datcomb[,5:6])==TRUE)]
+
+# if euclidean
+#p2k<-makeDists(cbind(predgrid$x.pos, predgrid$y.pos), knotgrid)$dataDist
+
+```
+
+```{r}
+preds<-fitted(mymodll)[analysisdat$response==0]
+predgrid<-analysisdat[analysisdat$response==0,]
+```
+
+
+```{r}
+#quilt.plot(predgrid$x.pos, predgrid$y.pos, p2k[,1], nrow=98, ncol=98)
+```
+
+
+```{r}
+# predbasis<-LRF.g(radiusIndices = bestModel$splineParams[[1]]$radiusIndices, dists = p2k, radii = bestModel$splineParams[[1]]$radii, aR = bestModel$splineParams[[1]]$knotPos)
+# 
+# par(mfrow=c(3,2))
+# for(i in 1:39){
+#   quilt.plot(predgrid$x.pos, predgrid$y.pos, predbasis[,i], nrow=98, ncol=98, asp=1)
+# }
+```
+
+
+```{r, fig.cap='Estimated intensity for the best log-likelihood model. The black circles are observed carcass locations.'}
+png('../results/mrsearesult_loglik.png', height=900, width=2000, res=300)
+ggplot() + geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fitsll), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  #scale_fill_distiller(palette = "Spectral",name="Intensity", limits=c(0, 0.56)) +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=1/5) +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.81)) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+dev.off()
+
+```
+
+
+```{r}
+require(rgdal)
+roads<-readOGR( dsn='C:\\Users\\lass\\OneDrive - University of St Andrews\\papers\\papers\\CarcassSALSApaper\\August2020\\data\\shapefiles', layer="enp roads")
+proj4string(roads) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+roadsUTM <- spTransform(roads, CRS("+proj=utm +zone=33 ellps=WGS84"))
+roads_fortify<-fortify(roadsUTM)
+```
+
+
+
+
+```{r, fig.cap='Estimated intensity for the best log-likelihood model. The black circles are observed carcass locations and the lines show the roads.'}
+png('../results/mrsearesult_loglik_roads.png', height=900, width=2000, res=300)
+
+ggplot() + geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fitsll), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  #scale_fill_distiller(palette = "Spectral",name="Intensity", limits=c(0, 0.56)) +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.81)) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  dev.off()
+
+```
+
+```{r, fig.cap='Estimated intensity for the best log-likelihood model. The lines show the roads.'}
+png('../results/mrsearesult_loglik_roads_nopoints.png', height=900, width=2000, res=300)
+
+ggplot() + geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fitsll), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+ # scale_fill_distiller(palette = "Spectral",name="Intensity", limits=c(0, 0.56)) +
+  #geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=1/2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.81)) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  dev.off()
+
+```
+
+# Best of each parameterisation
+
+```{r}
+modid<-filter(fulldat, type=='EucE') %>% arrange(desc(ll)) %>% pull(index)
+modid<-modid[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+basis_bic<- LRF.e(radiusIndices = splistall[[modid]]$radiusIndices, 
+                  dists = splistall[[modid]]$dist, 
+                  radii = splistall[[modid]]$radii, 
+                  aR = splistall[[modid]]$knotPos)
+
+mymodbic<- gamMRSea(response/pp.wts ~ basis_bic , family='poisson', data=analysisdat, weights=pp.wts)
+
+analysisdat$fits_euce<-fitted(mymodbic)
+
+p1<-ggplot() + 
+  geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fits_euce), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.81)) + 
+  coord_equal() + 
+  theme_bw()  +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  ggtitle("Exponential, Euclidean")+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("Easting (Km)") + ylab("Northing (Km)")
+p1
+```
+
+
+```{r}
+modid<-filter(fulldat, type=='EucG') %>% arrange(desc(ll)) %>% pull(index)
+modid<-modid[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+basis_bic<- LRF.g(radiusIndices = splistall[[modid]]$radiusIndices, 
+                  dists = splistall[[modid]]$dist, 
+                  radii = splistall[[modid]]$radii, 
+                  aR = splistall[[modid]]$knotPos)
+
+mymodbic<- gamMRSea(response/pp.wts ~ basis_bic , family='poisson', data=analysisdat, weights=pp.wts)
+mymodbic$splineParams[[1]]<-splistall[[modid]]
+
+analysisdat$fits_eucg<-fitted(mymodbic)
+summary(filter(analysisdat, response==0))
+
+p2<-ggplot() + 
+  geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fits_eucg), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.33)) + 
+  coord_equal() + 
+  theme_bw()  +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  ggtitle("Gaussian, Euclidean")+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("Easting (Km)") + ylab("Northing (Km)")
+```
+
+
+```{r}
+modid<-filter(fulldat, type=='GeoE') %>% arrange(desc(ll)) %>% pull(index)
+modid<-modid[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+basis_bic<- LRF.e(radiusIndices = splistall[[modid]]$radiusIndices, 
+                  dists = splistall[[modid]]$dist, 
+                  radii = splistall[[modid]]$radii, 
+                  aR = splistall[[modid]]$knotPos)
+
+mymodbic<- gamMRSea(response/pp.wts ~ basis_bic , family='poisson', data=analysisdat, weights=pp.wts)
+
+analysisdat$fits_geoe<-fitted(mymodbic)
+summary(filter(analysisdat, response==0))
+
+p3<-ggplot() + 
+  geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fits_geoe), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.33)) + 
+  coord_equal() + 
+  theme_bw()  +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  ggtitle("Exponential, Geodesic")+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  + xlab("Easting (Km)") + ylab("Northing (Km)")
+```
+
+```{r}
+modid<-filter(fulldat, type=='GeoG') %>% arrange(desc(ll)) %>% pull(index)
+modid<-modid[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+basis_bic<- LRF.g(radiusIndices = splistall[[modid]]$radiusIndices, 
+                  dists = splistall[[modid]]$dist, 
+                  radii = splistall[[modid]]$radii, 
+                  aR = splistall[[modid]]$knotPos)
+
+mymodbic<- gamMRSea(response/pp.wts ~ basis_bic , family='poisson', data=analysisdat, weights=pp.wts)
+
+analysisdat$fits_geog<-fitted(mymodbic)
+summary(filter(analysisdat, response==0))
+
+p4<-ggplot() + 
+  geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fits_geog), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.56)) + 
+  coord_equal() + 
+  theme_bw()  +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  ggtitle("Gaussian, Geodesic")+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  + xlab("Easting (Km)") + ylab("Northing (Km)")
+```
+
+```{r}
+require(gridExtra)
+grid.arrange(p3, p4, p1, p2)
+png('../results/mrseapredplots_4methods.png', height=600, width=1000)
+grid.arrange(p3, p4, p1, p2, nrow=2)
+dev.off()
+
+```
+
+# Model Average Results
+
+```{r}
+maplotdat <- read.csv('../results/modelavgplotdata_140621.csv')
+mascores <- read.csv('../results/ModAvgScores_140621.csv')
+mascores$type <- c('GeoE', 'GeoG', 'EucE', 'EucG')
+```
+
+```{r}
+png('../results/modavgresult_loglik_roads.png', height=900, width=2000, res=300)
+
+ggplot() + geom_tile(data=filter(maplotdat, response==0), aes(x=x.pos, y=y.pos, fill=preds.exp.geo), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.26)) + 
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  dev.off()
+
+```
+
+```{r}
+p1<-ggplot() + 
+  geom_tile(data=maplotdat, aes(x=x.pos, y=y.pos, fill=preds.exp.euc), height=2, width=2) +
+  coord_equal() + 
+  theme_bw() + ggtitle("Exponential, Euclidean") +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.26)) + 
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2)+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  labs(x='Easting (Km)', y='Northing (Km)')
+
+p2<-ggplot() + 
+  geom_tile(data=maplotdat, aes(x=x.pos, y=y.pos, fill=preds.gau.euc), height=2, width=2) +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.26)) + 
+  coord_equal() + 
+  theme_bw() + ggtitle("Gaussian, Euclidean") +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2)+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  labs(x='Easting (Km)', y='Northing (Km)')
+
+p3<-ggplot() + 
+  geom_tile(data=maplotdat, aes(x=x.pos, y=y.pos, fill=preds.exp.geo), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.26)) +  
+  coord_equal() + 
+  theme_bw() + ggtitle("Exponential, Geodesic") +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2)+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  labs(x='Easting (Km)', y='Northing (Km)')
+
+p4<-ggplot() + 
+  geom_tile(data=maplotdat, aes(x=x.pos, y=y.pos, fill=preds.gau.geo), height=2, width=2) +
+scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.56)) +  
+  coord_equal() + 
+  theme_bw() + ggtitle("Gaussian, Geodesic") +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2)+
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  labs(x='Easting (Km)', y='Northing (Km)')
+
+
+grid.arrange(p3, p4, p1, p2, nrow=2)
+
+png('../results/modelavgpredplots.png', height=600, width=1000)
+grid.arrange(p3, p4, p1, p2, nrow=2)
+dev.off()
+```
+
+
+
+
+```{r}
+fulldat <- mutate(fulldat, modelID = rep(1:12, 4))
+```
+
+```{r}
+plotlabs<-data.frame(type = c('EucE', 'EucG', 'GeoE', 'GeoG'), Parameters=c("Euc, Exp", "Euc, Gau", "Geo, Exp", "Geo, Gau"))
+mascores<-left_join(mascores, plotlabs)
+png('../results/simulationscores.png', height=900, width=1500, res=300)
+left_join(fulldat, plotlabs) %>% 
+ggplot(aes(x=modelID, y=-ll, colour=Parameters, shape=Parameters)) + 
+  geom_line() + 
+  geom_point() + 
+  theme_bw() + ylab('Negative Log-Likelihood') + xlab("Model ID") +
+  # guides(colour=guide_legend(title=NULL))  + 
+  scale_x_continuous(breaks=seq(1:12), labels = 1:12) +
+  theme(panel.grid.major.x = element_blank()) +
+  geom_hline(data=mascores, aes(yintercept=-LogLik,colour=Parameters), size=1, alpha=1/2)+
+  geom_point(data=mascores, aes(x=c(0.6, 0.8, 0.6, 0.8), y=-LogLik, colour=Parameters, shape=Parameters), size=1)+
+  scale_color_viridis(discrete=TRUE) 
+dev.off()
+```
+
+```{r}
+png('../results/simulationscoresbic.png', height=900, width=1500, res=300)
+left_join(fulldat, plotlabs) %>% 
+ggplot(aes(x=modelID, y=mybic, colour=Parameters, shape=Parameters)) + 
+  geom_line() + 
+  geom_point() + 
+  theme_bw() + ylab('BIC') + xlab("Model ID") +
+  # guides(colour=guide_legend(title=NULL))  + 
+  scale_x_continuous(breaks=seq(1:12), labels = 1:12) +
+  theme(panel.grid.major.x = element_blank()) +
+  scale_color_viridis(discrete=TRUE) 
+dev.off()
+```
+
+```{r}
+outtable<-fulldat
+
+outtable <- outtable %>% 
+  mutate(`Distance Type` = case_when(type=="EucE" ~ "Euclidean",
+                                     type=="EucG" ~ "Euclidean",
+                                     type=="GeoE" ~ "Geodesic",
+                                     type=="GeoG" ~ "Geodesic"),
+                    Basis = case_when(type=="EucE" ~ "Exponential",
+                                      type=="EucG" ~ "Gaussian",
+                                      type=="GeoE" ~ "Exponential",
+                                      type=="GeoG" ~ "Gaussian")) %>%
+  select(`Distance Type`, 
+           Basis,
+           StartKnots, 
+           noKnots, 
+           ll, 
+           mybic, 
+           timing_min) %>%
+  rename(LogLik = ll,
+         BIC = mybic,
+         `Time \n(min)` = timing_min,
+         `Start \nKnots` = StartKnots,
+         `End \nKnots` = noKnots)
+```
+
+```{r}
+require(knitr)
+require(kableExtra)
+#linebreak("a\nb")
+mytab1<-outtable[1:24,] %>% 
+  mutate_all(linebreak) %>% 
+  kable(format = 'latex', digits = 1, escape = FALSE, col.names = linebreak(names(outtable)), longtable=TRUE)
+
+mytab2<-outtable[25:48,] %>% 
+  mutate_all(linebreak) %>% 
+  kable(format = 'latex', digits = 1, escape = FALSE, col.names = linebreak(names(outtable)), longtable=TRUE)
+```
+
+
+```{r}
+# best loglik models
+mytab3<-arrange(outtable, desc(LogLik)) %>%  
+  slice_head(n=10) %>%
+  mutate_all(linebreak) %>% 
+  kable(format = 'latex', digits = 1, escape = FALSE, col.names = linebreak(names(outtable)))
+```
+
+
+```{r}
+# best bic models
+mytab4<-arrange(outtable, BIC) %>%  
+  slice_head(n=10) %>%
+  mutate_all(linebreak) %>% 
+  kable(format = 'latex', digits = 1, escape = FALSE, col.names = linebreak(names(outtable)))
+```
+
+
+## making combined plots for Paper
+
+This will run stand alone from the rest of the document
+
+```{r, eval=FALSE}
+library(ggplot2)
+library(dplyr)
+
+setwd("C:/Users/lindesay/OneDrive - University of St Andrews/papers/papers/CarcassSALSApaper/August2020")
+
+
+# ~~~~~~~~~~~~~~~~~~~ 
+# Data
+# ~~~~~~~~~~~~~~~~~~~
+
+analysisdat<-read.csv(file='data/analysisdat.csv')
+require(rgdal)
+proj4string = CRS("+proj=utm +zone=33 +units=km")
+
+require(splancs)
+largepan<-read.csv('data/largepan.csv')[,2:3]/1000
+fence<-read.csv('data/fencepoly.csv')/1000
+
+roads<-readOGR( dsn='C:\\Users\\lindesay\\OneDrive - University of St Andrews\\papers\\papers\\CarcassSALSApaper\\August2020\\data\\shapefiles', layer="enp roads")
+proj4string(roads) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+roadsUTM <- spTransform(roads, CRS("+proj=utm +zone=33 ellps=WGS84"))
+roads_fortify<-fortify(roadsUTM)
+# ~~~~~~~~~~~~~~~~~~~ 
+# SALSA2D
+# ~~~~~~~~~~~~~~~~~~~
+
+load(file = 'results/cressmrsea11062121_pp1.RData')
+Routputs_a<-Routputs
+load(file = 'results/cressmrsea11062121_pp2.RData')
+Routputs_b<-Routputs
+Routputs<- c(Routputs_a, Routputs_b)
+
+
+res1 = data.frame(t(sapply(Routputs, '[[','res')))
+typedf<-data.frame(type.num=c(1:4), type=c('EucE', 'EucG', 'GeoE', 'GeoG'))
+
+fulldat<- res1
+fulldat$index<-1:nrow(fulldat)
+fulldat$StartKnots<-as.numeric(fulldat$StartKnots)
+fulldat$type<-as.character(fulldat$type)
+fulldat$noKnots<-as.numeric(fulldat$noKnots)
+fulldat$ll<-as.numeric(fulldat$ll)
+fulldat$AICc<-as.numeric(fulldat$AICc)
+fulldat$BIC<-as.numeric(fulldat$BIC)
+fulldat$timing_min<-as.numeric(fulldat$timing_min)
+fulldat <- left_join(typedf, fulldat)
+
+splistall = sapply(Routputs, '[[','splist')
+fulldat <- fulldat %>% mutate(mybic = (-2*ll) + (log(nrow(analysisdat)) * noKnots)) 
+
+require(MRSea)
+modid<-arrange(fulldat, desc(ll))$index[1]
+modelspec<-filter(fulldat, index==modid)
+modelspec
+
+basis_ll<- LRF.e(radiusIndices = splistall[[modid]]$radiusIndices, dists = splistall[[modid]]$dist, radii = splistall[[modid]]$radii, aR = splistall[[modid]]$knotPos)
+mymodll<- gamMRSea(response/pp.wts ~ basis_ll , family='poisson', data=analysisdat, weights=pp.wts)
+mymodll$splineParams[[1]]<-splistall[[modid]]
+
+analysisdat$fitsll<-fitted(mymodll)
+
+# ~~~~~~~~~~~~~~~~~~~ 
+# Model Averaging
+# ~~~~~~~~~~~~~~~~~~~ 
+
+maplotdat <- read.csv('results/modelavgplotdata_140621.csv')
+mascores <- read.csv('results/ModAvgScores_140621.csv')
+mascores$type <- c('GeoE', 'GeoG', 'EucE', 'EucG')
+
+load(file='results/resultsmodelavg_models.RData')
+
+load('data/knot2knotDist_geo.Robj')
+load('data/data2knotDist_geo.Robj')
+distMats_Geo<-list(dataDist= d2k, knotDist=k2k)
+rm(d2k, k2k)
+
+res.in<-outmodels[[2]]
+basis='exponential'
+disttype='geo'
+dMat <- distMats_Geo
+r_seq<-getRadiiChoices(10, dMat$dataDist, basis=basis)
+kgnew<-NULL
+
+for(i in 1:nrow(res.in)){
+  
+  k<-res.in[i,'k']
+  r<-res.in[i,'r']
+  
+  load(paste('data/kg', k, '.RData', sep=''))
+  
+  
+  knotid<-attributes(knotgrid)$points.selected
+  b<-LRF.e(rep(r,times=k), dMat$dataDist, radii=r_seq, aR=attr(knotgrid, "points.selected"))
+  dattest<- data.frame(response=analysisdat$response, pp.wts = analysisdat$pp.wts, b)
+  modFit<- glm(response/pp.wts ~ ., family='poisson', data=dattest, weights=pp.wts)
+  
+  kgnew<-rbind(kgnew, data.frame(knotgrid, 
+                                 radii = r_seq[r],
+                                 coefsign=as.factor(ifelse(coef(modFit)[-1]<0, 0, 1))))
+  
+} # end i loop (single model run)
+
+# ~~~~~~~~~~~~~~~~~~~
+# FIGURE 4
+# ~~~~~~~~~~~~~~~~~~~
+
+salsaroads <- ggplot() + geom_tile(data=filter(analysisdat, response==0), aes(x=x.pos, y=y.pos, fill=fitsll), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  #scale_fill_distiller(palette = "Spectral",name="Intensity", limits=c(0, 0.56)) +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.81)) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', linewidth=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  annotate("text", x=430, y=-2025, label= "(b) SALSA2D")
+
+
+
+modavgroads <- ggplot() + geom_tile(data=filter(maplotdat, response==0), aes(x=x.pos, y=y.pos, fill=preds.exp.geo), height=2, width=2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.26)) + 
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), shape=1, alpha=0.2) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  geom_path(data=roads_fortify, aes(x=long/1000, y=lat/1000, group=group), colour='black', size=0.3, alpha=0.2)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  annotate("text", x=445, y=-2025, label= "(a) Model Averaging")
+
+
+
+library(patchwork)
+
+jpeg('results/Figure4.jpg', height=1800, width=2200, res=300)
+modavgroads/salsaroads
+dev.off()
+
+
+# ~~~~~~~~~~~~~~~~~~~
+# FIGURE 5
+# ~~~~~~~~~~~~~~~~~~~
+library(viridis)
+
+knotgrid<-mymodll$splineParams[[1]]$knotgrid
+plotknots<-knotgrid[mymodll$splineParams[[1]]$knotPos,]
+plotknots$coefsign<-as.factor(ifelse(coef(mymodll)[-1]<0, 0, 1))
+plotknots$radii<-mymodll$splineParams[[1]]$radii[mymodll$splineParams[[1]]$radiusIndices]/100
+
+modknots<-ggplot() +
+  geom_point(data=plotknots,
+             aes(x=x.pos, y=y.pos,colour=coefsign, size=sqrt(radii)), alpha=1/2) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), alpha=1/5, size=0.5) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_polygon(data=fence, aes(x=x.pos, y=y.pos), fill=NA, colour='black') +
+  scale_size(guide=FALSE) +
+  scale_color_viridis(discrete=TRUE) +
+  guides(colour="none") +
+  annotate("text", x=427, y=-2025, label= "(b) SALSA2D")
+
+modavgknots<-ggplot() +
+  geom_point(data=kgnew,
+             aes(x=x.pos, y=y.pos, colour=coefsign, size=sqrt(radii)), alpha=1/5) +
+  theme_bw() + coord_equal() +
+  labs(x='Easting (Km)', y='Northing (Km)') +
+  geom_point(data=filter(analysisdat, response==1), aes(x=x.pos, y=y.pos), alpha=1/5, size=0.5) +
+  geom_polygon(data=data.frame(largepan), aes(x=x, y=y), fill='lightblue')+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_polygon(data=fence, aes(x=x.pos, y=y.pos), fill=NA, colour='black') +
+  scale_size(guide="none") +
+  scale_color_viridis(discrete=TRUE) +
+  guides(colour="none") +
+  annotate("text", x=465, y=-2025, label= "(a) Model Averaging (11 models)")
+
+
+jpeg('results/Figure5.jpg', height=2000, width=2200, res=300)
+modavgknots/modknots
+dev.off()
+
+```
+
+<!-- # Best BIC model with Geodesic distances -->
+
+<!-- Geodesic exponential model. Second best model 1.5 BIC points worse than best model. Starting at 40 knots, finishing with 23. -->
+
+<!-- ```{r} -->
+<!-- require(MRSea) -->
+<!-- bestmodel<-fulldat$index[4] -->
+<!-- splineParams<-list(splistall[[bestmodel]]) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- bestModel<-gamMRSea(response ~ LRF.e(radiusIndices, dists, radii, aR), splineParams = splineParams, data=datcomb, family='binomial') -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- summary(bestModel) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- require(splancs) -->
+<!-- largepan<-read.csv('data/largepan.csv') -->
+<!-- fence<-read.csv('data/databoundary.csv') -->
+<!-- knotgrid<-bestModel$splineParams[[1]]$knotgrid -->
+<!-- polymap(fence) -->
+<!-- polymap(largepan, add=TRUE) -->
+<!-- points(datcomb$x.pos, datcomb$y.pos, pch=20, col='grey') -->
+<!-- points(knotgrid[bestModel$splineParams[[1]]$knotPos,1], knotgrid[bestModel$splineParams[[1]]$knotPos,2],cex=bestModel$splineParams[[1]]$radiusIndices, col='blue') -->
+<!-- ``` -->
+
+<!-- ```{r, fig.cap='Fitted values for the best BIC model.'} -->
+<!-- quilt.plot(datcomb$x.pos, datcomb$y.pos, fitted(bestModel)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- load('data/pred2knotDist.Robj') # object called p2k -->
+<!-- # remove duplicated knots -->
+<!-- p2k<-p2k[,-which(duplicated(datcomb[,5:6])==TRUE)] -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- preds<-predict(object = bestModel, newdata=predgrid, g2k=p2k, type='response') -->
+<!-- ``` -->
+
+<!-- ```{r, fig.cap='Predictions to the grid for the best BIC model. The red dots are observed deaths and the grey dots generated zeros.'} -->
+<!-- ggplot() + geom_raster(data=predgrid, aes(x=x.pos/1000, y=y.pos/1000, fill=preds), alpha=0.8) + -->
+<!--   theme_bw() + -->
+<!--   labs(x='Easting (Km)', y='Northing (Km)') + -->
+<!--   scale_fill_gradient(low='lightgrey', high='darkred', name='Probability')+ -->
+<!--   geom_point(aes(x=x.pos/1000, y=y.pos/1000, group=as.factor(death), colour=as.factor(death)), alpha=0.5, data=datcomb)+ -->
+<!--   scale_color_manual(values=c('darkgrey', 'red'), guide=FALSE) + coord_equal()+ -->
+<!--   geom_polygon(data=data.frame(largepan), aes(x=x/1000, y=y/1000), fill='lightblue') -->
+<!--   #geom_path(data=fences_fortify, aes(x=x.pos/1000, y=y.pos/1000, group=group), colour='black') -->
+
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- bestmodel<-fulldat$index[1] -->
+<!-- splineParams<-list(splistall[[bestmodel]]) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- fulldat$type.fac[fulldat$index==bestmodel] -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- bestModel<-gamMRSea(response ~ LRF.e(radiusIndices, dists, radii, aR), splineParams = splineParams, data=datcomb, family='binomial') -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- scores= vector(length=100) -->
+
+
+<!-- for(cvs in 1:100){ -->
+<!--   set.seed(cvs) -->
+<!--   folds<-boot:::sample0(rep(1L:10, 96), 960) -->
+<!--   cv=0 -->
+
+<!--   for(f in 1:10){ -->
+<!--     preds<-NULL -->
+
+
+<!--     splineParamssub<-splineParams -->
+<!--     splineParamssub[[1]]$dist<-splineParams[[1]]$dist[folds!=f,] -->
+<!--     p2ksub<- splineParams[[1]]$dist[folds==f,] -->
+<!--     datcombsub<-datcomb[folds!=f,] -->
+
+
+<!--     modFit<-gamMRSea(response ~ LRF.e(radiusIndices, dists, radii, aR), splineParams = splineParamssub, data=datcombsub, family='binomial') -->
+
+<!--     datcombpred<-datcomb[folds==f,] -->
+<!--     pred<-predict(object = modFit, newdata=datcombpred, g2k=p2ksub, type="response") -->
+
+<!--     # calculate RSS for fold f -->
+<!--     cv<- cv + (table(folds)[f]/nrow(datcomb)) * mean((datcomb$response[folds==f] - pred)^2) -->
+
+<!--   } # end folds -->
+
+
+<!--   scores[cvs]<-cv -->
+
+
+<!--   write.csv(scores, file='results/Jan2018/CVoverallscores_bic.csv', row.names = FALSE) -->
+
+
+<!-- }# end cviters -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- quantile(scores, probs=c(0.025, 0.5, 0.975)) -->
+<!-- ``` -->
+

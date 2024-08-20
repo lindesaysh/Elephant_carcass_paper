@@ -1,0 +1,728 @@
+---
+title: "Mike Analysis"
+author: "Lindesay Scott-Hayward"
+date: "August 2024"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE, dev="png")
+```
+
+```{r, warning=FALSE, message=FALSE}
+#devtools::install_git("https://github.com/lindesaysh/MRSea.git")
+require(MRSeaPP)
+require(splancs)
+require(ggplot2)
+require(fields)
+require(splines)
+require(spatstat)
+library(sf)
+require(dplyr)
+require(tidyterra)
+library(RColorBrewer)
+library(stars)
+library(terra)
+computer='pc'
+```
+
+```{r, results="hide"}
+fences<-st_read(dsn='../data/shapefiles/enp fence line.shp')
+st_crs(fences) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+
+fencesutm <- st_transform(fences, crs = "+proj=utm +zone=33 ellps=WGS84")
+```
+
+```{r, results='hide'}
+pans<-st_read(dsn='../data/shapefiles/enp pans.shp')
+st_crs(pans) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+
+pansutm <- st_transform(pans, crs = "+proj=utm +zone=33 ellps=WGS84")
+```
+
+```{r}
+# load in pan data (2.5km internal buffer)
+largepan<-read.csv('../data/largepan.csv')
+largepan<-largepan/1000
+largepan.list<-list(x=largepan$x, y=largepan$y)
+```
+
+```{r}
+# ENP boundary plus 20km
+fence<-read.csv('../data/databoundary.csv')
+fence<-fence[nrow(fence):1,]/1000
+fence.list<-list(x=fence$x.pos, y=fence$y.pos)
+```
+
+```{r}
+# read in points data
+datcomb<- read.csv("../data/datcomb.csv", header=TRUE)
+```
+
+```{r}
+#subset just to get the presences
+dat.pres<-datcomb[datcomb$response==1,]
+dat<-datcomb[datcomb$response==1,c('x.pos', 'y.pos')]/1000
+
+datsf <- st_as_sf(dat.pres, coords = c('x.pos', 'y.pos'), crs = "+proj=utm +zone=33 ellps=WGS84")
+```
+
+```{r}
+ggplot(dat.pres) +
+  geom_histogram(aes(x=year), bins=17, colour="darkred", fill="grey") + theme_bw() +
+  xlab("Year") +ylab("Number of Carcasses")
+
+ggsave(file="../results_dec24/carcbyyearplot.png", width = 11, height=9, dpi=300, units = "cm")
+```
+
+
+```{r}
+ggplot(dat.pres) + geom_point(aes(x.pos, y.pos), alpha=1/2) + facet_wrap(~year)
+ggplot(dat.pres) + geom_point(aes(x.pos, y.pos), alpha=1/2) + facet_wrap(~month)
+```
+
+```{r}
+groups <- data.frame(year = unique(dat.pres$year), gp = c(rep(1, 6), rep(2, 6), rep(3, 6)))
+left_join(dat.pres, groups) %>%
+  ggplot() +
+    geom_point(aes(x.pos, y.pos), alpha=1/2) + facet_wrap(~gp) + coord_equal()
+```
+
+```{r}
+library(splancs)
+pts = matrix(as.matrix(dat.pres[c("x.pos", "y.pos")]), ncol=2)
+p <- splancs::as.points(fence)
+
+bob <- stmctest(pts = pts/1000, times = dat.pres$year, poly = p, s = seq(1,300, 10), tlimits = c(2000, 2017), tt = seq(2000, 2017, 1), nsim=999, quiet=TRUE, returnSims = TRUE)
+
+plot(density(bob$t))
+abline(v=bob$t0)
+
+sum(bob$t > bob$t0) / 1000
+
+dat.pres <- left_join(dat.pres, groups)
+bob2 <- stmctest(pts = pts/1000, times = dat.pres$gp, poly = p, s = seq(1,300, 10), tlimits = c(1, 3), tt = seq(1, 3, 1), nsim=999, quiet=TRUE, returnSims = TRUE)
+
+plot(density(bob2$t))
+abline(v=bob2$t0)
+
+sum(bob2$t > bob2$t0) / 1000
+
+```
+
+
+```{r}
+path2020<-"C:\\Users\\lass\\OneDrive - University of St Andrews\\papers\\papers\\CarcassSALSApaper\\August2020\\data\\shapefiles\\"
+```
+
+
+```{r}
+roads<-st_read(dsn=paste0(path2020, 'enp roads.shp'))
+st_crs(roads) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+roadsutm <- st_transform(roads, crs = "+proj=utm +zone=33 ellps=WGS84")
+
+water<-st_read(dsn=paste0(path2020, 'waters2.shp'))
+st_crs(water) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+waterutm <- st_transform(water, crs = "+proj=utm +zone=33 ellps=WGS84")
+
+waterh<-st_read(dsn=paste0(path2020, 'functional water.shp'))
+st_crs(waterh) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+waterholes <- st_transform(waterh, crs = "+proj=utm +zone=33 ellps=WGS84")
+waterholelocs<-st_coordinates(waterholes)
+
+tracks<-st_read(dsn=paste0(path2020, 'TRACK.shp'))
+st_crs(tracks) <- st_crs("+proj=longlat +datum=WGS84")  ## for example
+waterutm <- st_transform(tracks, crs = "+proj=utm +zone=33 ellps=WGS84")
+```
+
+
+```{r}
+ggplot() +
+  theme_bw() +
+  #scale_shape(guide=FALSE)+
+  geom_sf(data=pansutm, aes(fill='lightblue')) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, aes(colour='firebrick'), size=0.3, alpha=0.5) +
+  geom_sf(data=waterholes, aes(colour = 'blue'),shape=4) +
+  geom_sf(data = fencesutm, aes(colour="grey4")) + 
+  geom_sf(data = filter(datsf, code %in% c("BUR", "DES", "DIS", "DR", "LP", "LPS", "MIS", "OA", "POA", "SH", "STR", "Unk")), alpha= 1/2, size=2, shape=16, aes(colour = "black"))+
+  geom_sf(data = filter(datsf,  code %in% c("ANP", "ANS")), aes(colour="darkgreen"), shape=17, size=2, alpha=1/2) +
+  scale_color_identity(name = "", guide = "legend", 
+                       breaks = c("darkgreen", "black", "blue", "firebrick", "grey4", "lightblue"),
+                       labels = c(firebrick = "Roads", 
+                                  blue = "Waterholes",
+                                  darkgreen = "Anthrax death",
+                                  black = "Other death",
+                                  grey4 = "Fence",
+                                  lightblue = "Etosha pans")) +
+  scale_fill_identity(name = "Legend", guide = "legend", 
+                       labels = c(firebrick = "Roads", 
+                                  blue = "Waterholes",
+                                  darkgreen = "Anthrax death",
+                                  black = "Other death",
+                                  grey4 = "Fence",
+                                  lightblue = "Etosha pans")) +
+  guides(color = guide_legend(override.aes = list(fill = c(NA, NA, NA, NA, "lightblue"))))
+
+ggsave('../results_dec24/rawdataplot_anth.png', height=10, width=25, dpi = 300, units="cm")
+```
+
+
+
+```{r}
+# create boundary listing so that quad points created in correct area
+Z<-owin(poly=list(fence.list, largepan.list))
+
+x<-dat$x.pos
+y<-dat$y.pos
+
+P<-ppp(x, y, poly=list(fence.list, largepan.list))
+plot(P)
+```
+
+```{r}
+dummyQpts<-quadscheme(P, eps=2)$dummy
+dpts<-data.frame(x.pos=dummyQpts$x, y.pos=dummyQpts$y)
+plot(dummyQpts)
+plot(P, add = TRUE, cex = 0.5)
+```
+
+```{r}
+analysisdat<-rbind(data.frame(dat, response=1), data.frame(dpts, response=0))
+#kg<-  getKnotgrid(analysisdat[,1:2], plot = FALSE)
+kga<- data.frame(x.pos=dat$x.pos, y.pos=dat$y.pos)
+set.seed(1234)
+kgb<- getKnotgrid(coordData = dpts, numKnots = 50, plot = FALSE)
+kg<-rbind(kga, kgb)
+duplicatedid<-which(duplicated(kga)==TRUE)
+if(length(duplicatedid)>0){ kg<-kg[-duplicatedid,]}
+```
+
+```{r}
+distMats<-makeDists(cbind(analysisdat$x.pos, analysisdat$y.pos), kg)
+```
+
+
+
+```{r}
+p.wt<-rep(1e-6, nrow(analysisdat))
+p.wt[analysisdat$response==0]<-summary(dummyQpts)$window$area/sum(analysisdat$response==0)
+# must have column in data called pp.wts
+analysisdat$pp.wts<-p.wt
+```
+
+
+# Data prep
+
+Calculate the distance to the nearest water hole:
+
+```{r}
+waterholedists<-makeDists(cbind(analysisdat$x.pos, analysisdat$y.pos), knotcoords = st_coordinates(waterholes)/1000,knotmat = FALSE)
+
+analysisdat$distwater_km<-apply(waterholedists$dataDist, 1, min)
+```
+
+
+
+```{r}
+quilt.plot(analysisdat$x.pos, analysisdat$y.pos, analysisdat$distwater_km, nrow=170, ncol=77, asp=1)
+points(analysisdat$x.pos[analysisdat$response==1], analysisdat$y.pos[analysisdat$response==1], pch=20, col='lightblue')
+```
+
+### distance to nearest road
+
+```{r}
+analysisdat.sf <- st_as_sf(analysisdat %>% mutate(x.posm = x.pos*1000, y.posm = y.pos*1000), coords = c("x.posm", "y.posm"), crs = st_crs(datsf))
+
+``` 
+
+```{r}
+library(magrittr)
+analysisdat %<>% mutate(dist2road = apply(st_distance(analysisdat.sf, roadsutm), 1, min)/1000)
+
+```
+
+```{r}
+ggplot()+
+  geom_tile(data = analysisdat, aes(x=x.pos*1000, y=y.pos*1000, fill = dist2road), height=2000, width=2000) +
+  geom_sf(data = fencesutm) + xlab("") + ylab("")
+```
+
+```{r}
+quilt.plot(analysisdat$x.pos, analysisdat$y.pos, analysisdat$dist2road, nrow=170, ncol=77, asp=1)
+points(analysisdat$x.pos[analysisdat$response==1], analysisdat$y.pos[analysisdat$response==1], pch=20, col='lightblue')
+```
+
+
+
+### rainfall
+
+```{r}
+rainfall2<-read.csv('../data/Fieldrainfall1983to2015.csv')[1:156,]
+```
+
+Find the mean annual rainfall at each of 158 sites from 1999 to 2015 (no rainfall data available for 2016 or 2017). 
+
+```{r}
+rainfall2$meanrain<-apply(rainfall2[,23:38], 1, mean, na.rm=TRUE)
+```
+
+Transpose the lats and longs to UTMs.
+```{r}
+rainfall2.sf <- st_as_sf(rainfall2, coords = c("E..X.", "S..Y."), crs = "+proj=longlat +datum=WGS84")
+rainfall2.sf <- st_transform(rainfall2.sf, crs = "+proj=utm +zone=33 +datum=WGS84") %>%
+  mutate(x.pos = st_coordinates(.)[,1]/1000,
+         y.pos = st_coordinates(.)[,2]/1000)
+
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = rainfall2.sf, aes(colour = meanrain)) +
+  geom_sf(data = fencesutm)
+```
+
+
+```{r}
+require(mgcv)
+fit<-gam(meanrain ~ s(x.pos, y.pos,fx = TRUE, k=150), data=rainfall2.sf)
+```
+
+```{r}
+preds<-predict(object = fit, 
+               newdata=data.frame(x.pos=analysisdat$x.pos, y.pos=analysisdat$y.pos))
+analysisdat %<>% mutate(meanrain=preds)
+```
+
+```{r}
+par(mfrow=c(2,2))
+quilt.plot(rainfall2.sf$x.pos , rainfall2.sf$y.pos , rainfall2.sf$meanrain, asp=1)
+quilt.plot(rainfall2.sf$x.pos , rainfall2.sf$y.pos , fitted(fit), asp=1)
+quilt.plot(analysisdat$x.pos , analysisdat$y.pos , preds, nrow=170, ncol=77, asp=1)
+quilt.plot(rainfall2.sf$x.pos , rainfall2.sf$y.pos , rainfall2.sf$meanrain-fitted(fit), asp=1)
+```
+
+
+# 1D Analysis
+
+Point process model:
+
+```{r}
+mutate(analysisdat, 
+       nearwater = case_when(distwater_km<3 ~ 1, 
+                             distwater_km >=3 ~ 0)) %>% 
+  group_by(nearwater) %>% 
+  summarise(n=n(), 
+            pcount = sum(response), 
+            meanresp = mean(response))
+```
+
+```{r}
+analysisdat <- mutate(analysisdat, 
+                      nearwater = case_when(distwater_km<3 ~ 1, 
+                                            distwater_km >=3 ~ 0))
+```
+
+
+```{r}
+analysisdat$y <- analysisdat$response/analysisdat$pp.wts
+initialModel<- glm(response/pp.wts ~ 1, family='poisson', data=analysisdat, weights=pp.wts)
+```
+
+<!-- Fit an initial model using the Binomial family, then add smooth terms (B-splines) for the distance to the nearest waterhole and the mean annual rainfall.  -->
+
+Distance to water removed owing to estimation issues.
+
+```{r }
+varlist<-c('distwater_km', 'dist2road', 'meanrain')
+salsa1dlist<-list(fitnessMeasure='BIC', 
+                  startKnots_1d=c(1,1,1), 
+                  minKnots_1d=c(1,1,1), 
+                  maxKnots_1d=c(3,3,3), 
+                  degree=c(2,2,2), 
+                  gaps=c(0,0,0),
+                  splines=c("ns", "ns", "ns"),
+                  modelType='pointProcess',
+                  fit.opts = list(N=sum(analysisdat$response)))
+```
+
+```{r 1dmodel, cache=TRUE}
+salsa1doutput<-runSALSA1D(initialModel, 
+                          salsa1dlist, 
+                          varlist,
+                          datain = analysisdat, 
+                          suppress.printout = TRUE, 
+                          removal = FALSE)
+```
+
+```{r}
+logLik(salsa1doutput$bestModel)
+AIC(salsa1doutput$bestModel, k=log(sum(analysisdat$response)))
+```
+
+```{r}
+summary(salsa1doutput$bestModel)
+```
+
+```{r}
+runPartialPlots(salsa1doutput$bestModel, analysisdat, varlist.in=c("distwater_km", "dist2road", "meanrain"), showKnots=TRUE)
+```
+
+```{r}
+meantable<-group_by(analysisdat, response) %>% 
+  summarise(m.distwater_km=mean(distwater_km), 
+            m.dist2road=mean(dist2road), 
+            m.meanrain=mean(meanrain))
+
+predict1dmeans<-data.frame(distwater_km=meantable[2,2], dist2road=meantable[2,3], meanrain=meantable[2,4], nearwater=0)
+
+names(predict1dmeans)=c('distwater_km', 'dist2road', 'meanrain', 'nearwater')
+
+modelin<-salsa1doutput$bestModel
+B=500
+for(i in 1:3){
+  variable<-names(predict1dmeans)[i]
+  datarange<-range(analysisdat %>% pull(variable))
+  varseq<-seq(datarange[1], datarange[2], length=1000)
+  eval(parse(text=paste('grid<-data.frame(predict1dmeans[,-',i,'],',variable,'=varseq)', sep='')))
+  
+  preds<-predict(object=modelin, newdata=grid, type='response')
+  samplecoeff<- rmvnorm(B,coefficients(modelin),summary(modelin)$cov.scaled, method='svd')
+  bootpreds<-matrix(NA, nrow=nrow(grid), ncol=B)
+  for(b in 1:B){
+    bootpreds[,b]<-predict.gamMRSea(newdata=grid, object=modelin, type='response', coeff=samplecoeff[b,])
+  }
+  cis<-makeBootCIs(bootpreds)
+  plotdata=data.frame(preds, lower=cis[,1], upper=cis[,2], variable=varseq)
+  eval(parse(text=paste("p", i, "<-ggplot() + geom_line(data=plotdata, aes(x=variable, y=preds)) + geom_ribbon(data=plotdata, aes(x=variable, ymin=lower, ymax=upper), alpha=1/5, fill='red')+ xlab(names(predict1dmeans)[i]) + ylab('Intensity') + theme_bw()  + geom_rug(data=analysisdat[analysisdat$response==1,], aes(",names(predict1dmeans)[i], "), sides = 'b')", sep="")))
+}
+```
+
+
+```{r}
+p1
+p2
+p3
+```
+
+
+
+```{r}
+library(gridExtra)
+png('../results_dec24/mike_analysis1D_partials.png', res=300, height=1700, width=1000)
+grid.arrange(p1, p2, p3)
+dev.off()
+```
+
+```{r}
+require(latex2exp)
+
+p3 + xlab("Mean Annual Rainfall (mm)") + xlim(c(300, 650)) +ylim(c(0, 0.11))
+ggsave('../results_dec24/Figure8.jpg', width=10, dpi=300, height=6, units="cm")
+
+p2 + xlab("Distance to Roads (km)") + xlim(c(0, 15))
+ggsave('../results_dec24/Figure7.jpg', width=10, dpi=300, height=6, units="cm")
+
+p1 + xlab("Distance to Waterholes (km)") + xlim(c(0, 20))
+ggsave('../results_dec24/Figure6.jpg', width=10, dpi=300, height=6, units="cm")
+```
+
+```{r}
+analysisdat$preds1D<-fitted(salsa1doutput$bestModel)
+
+analysisdat.sf$preds1D<-fitted(salsa1doutput$bestModel)
+```
+
+```{r}
+predrast <- stars::st_rasterize(filter(analysisdat.sf, response == 0), dx=2005, dy=2005) %>% 
+  rast
+terra::cellSize(predrast) 
+# correct names
+names(predrast) <- names(analysisdat.sf)[-which(names(analysisdat.sf)%in% c("geometry"))]
+
+p1d<-ggplot() +
+    theme_bw() +
+  scale_shape(guide=FALSE)+
+  geom_sf(data=pansutm, fill='lightblue')+
+  geom_spatraster(data = predrast["preds1D"]) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, colour='black', size=0.3, alpha=0.2) +
+  geom_sf(data=waterholes, colour = 'blue',shape=4) +
+  #geom_sf(data = fencesutm) +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.96), na.value = "transparent")
+
+ggsave(plot = p1d, filename = '../results_dec24/mikeanalysis1D_risk_roads_nopoints.png', height=5, width=11,dpi = 300)  
+
+p1d +
+  geom_sf(data = filter(analysisdat.sf, response==1), shape=1, alpha = 0.2)
+
+ggsave('../results_dec24/mikeanalysis1D_risk_roads.png', height=5, width=11,dpi = 300)  
+
+```
+
+```{r}
+require(car)
+anovatab<-Anova(salsa1doutput$bestModel)
+anovatab$`LR Chisq`
+anovatab$Df
+anovatab$`Pr(>Chisq)`
+```
+
+```{r}
+anova(salsa1doutput$bestModel)
+```
+
+
+
+```{r}
+#BIC(salsa1doutput$bestModel)
+```
+
+
+# 2D Analysis
+
+```{r }
+rs <- getRadiiChoices(10, distMats$dataDist, "exponential")
+
+rs2 <- getRadiiSequence(method = "variogram",
+                           numberofradii = 10,
+                           xydata = filter(analysisdat.sf, response==1) %>% select(x.pos, y.pos) %>% st_drop_geometry(),
+                           response =  log(filter(analysisdat.sf, response==1) %>% select(response) %>% st_drop_geometry() + 1),
+                           basis="exponential",
+                           showplots=FALSE,
+                           distMatrix = distMats$dataDist)
+
+```
+
+```{r}
+salsa2dlist<-list(fitnessMeasure = 'BIC',
+                  knotgrid = kg,
+                  startKnots=60,
+                  minKnots=2,
+                  maxKnots=70,
+                  cv.opts=list(K=5, cv.gamMRSea.seed=1),
+                  modelType='pointProcess',
+                  fit.opts = list(N=sum(analysisdat$response)))
+```
+
+```{r 2dmodel, cache=TRUE}
+salsa2dOutput<-runSALSA2D(salsa1doutput$bestModel, 
+                          salsa2dlist, 
+                          d2k=distMats$dataDist, 
+                          k2k=distMats$knotDist, 
+                          splineParams=NULL,
+                          suppress.printout = FALSE, 
+                          chooserad = FALSE, 
+                          basis = 'exponential')
+```
+
+```{r}
+summary(salsa2dOutput$bestModel)
+```
+
+```{r}
+logLik(salsa2dOutput$bestModel)
+AIC(salsa2dOutput$bestModel, k=log(sum(analysisdat$response)))
+```
+
+```{r}
+quilt.plot(analysisdat$x.pos[analysisdat$response==0],
+           analysisdat$y.pos[analysisdat$response==0], 
+           fitted(salsa2dOutput$bestModel)[analysisdat$response==0], 
+           asp=1, nrow=170, ncol=77)
+#points(analysisdat[analysisdat$response==1, c("x.pos", "y.pos")], col='lightblue')
+
+```
+
+
+```{r 2dmodel, cache=TRUE}
+salsa2dOutput_2donly<-runSALSA2D(initialModel, 
+                          salsa2dlist, 
+                          d2k=distMats$dataDist, 
+                          k2k=distMats$knotDist, 
+                          splineParams=NULL,
+                          suppress.printout = FALSE, 
+                          chooserad = FALSE, 
+                          basis = 'exponential')
+```
+
+```{r}
+logLik(salsa2dOutput_2donly$bestModel)
+AIC(salsa2dOutput_2donly$bestModel, k=log(sum(analysisdat$response)))
+```
+
+```{r}
+quilt.plot(analysisdat$x.pos[analysisdat$response==0],
+           analysisdat$y.pos[analysisdat$response==0], 
+           fitted(salsa2dOutput_2donly$bestModel)[analysisdat$response==0], 
+           asp=1, nrow=170, ncol=77)
+```
+
+# Outputs:
+
+
+```{r}
+analysisdat$preds2D<-fitted(salsa2dOutput$bestModel)
+```
+
+```{r}
+analysisdat.sf %<>%
+  mutate(preds2D =fitted(salsa2dOutput$bestModel),
+         diff = preds2D - preds1D)
+```
+
+
+```{r}
+predrast <- stars::st_rasterize(filter(analysisdat.sf, response == 0), dx=2005, dy=2005) %>% 
+  rast
+terra::cellSize(predrast) 
+# correct names
+names(predrast) <- names(analysisdat.sf)[-which(names(analysisdat.sf)%in% c("geometry"))]
+
+p2d<-ggplot() +
+  theme_bw() +
+  scale_shape(guide=FALSE)+
+  geom_sf(data=pansutm, fill='lightblue') +
+  geom_spatraster(data = predrast["preds2D"]) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, colour='black', size=0.3, alpha=0.2) +
+  geom_sf(data=waterholes, colour = 'blue',shape=4) +
+  #geom_sf(data = fencesutm) +
+  scale_fill_gradient(low='lightgrey', high='darkred', name='Intensity', limits=c(0, 0.96), na.value = "transparent")
+
+ggsave(plot = p2d, filename = '../results_dec24/mikeanalysis_risk_roads_nopoints.png', height=5, width=11,dpi = 300)  
+
+p2d +
+  geom_sf(data = filter(analysisdat.sf, response==1), shape=1, alpha = 0.2)
+
+ggsave('../results_dec24/mikeanalysis_risk_roads.jpg', height=5, width=11,dpi = 300)  
+```
+
+```{r}
+ggplot() +
+  theme_bw() +
+  scale_shape(guide=FALSE)+
+  geom_sf(data=pansutm, fill='lightblue')+
+  geom_spatraster(data = predrast["diff"]) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, colour='black', size=0.3, alpha=0.2) +
+  geom_sf(data=waterholes, colour = 'blue',shape=4) +
+  #geom_sf(data = fencesutm) +
+  scale_fill_gradient2(low = 'darkblue', mid='white', high='darkred', na.value = "transparent")
+
+ggsave(filename = '../results_dec24/mikeanalysis_1d2d_difference.jpg', height=5, width=11,dpi = 300)  
+
+```
+
+
+```{r}
+z2 <- p2d +
+  geom_sf(data=filter(analysisdat.sf, response==1), shape=1, alpha=1/5) +  
+  coord_sf(xlim = c(660000, 740000), ylim = c(-2100000, -2020000), expand = FALSE)+
+  annotate("text", x=695000, y=-2021500, label= "Model 2, 1D and 2D terms") + 
+  labs(tag="(b)") + xlab("") + ylab("")
+
+ggsave(plot=z2, filename = '../results_dec24/mikeanalysis_risk_roads_zoom2D.png', height=5, width=11,dpi = 300) 
+```
+
+```{r}
+z1 <- p1d + 
+  geom_sf(data=filter(analysisdat.sf, response==1), shape=1, alpha=1/5) +
+  coord_sf(xlim = c(660000, 740000), ylim = c(-2100000, -2020000), expand = FALSE)+
+  annotate("text", x=695000, y=-2021500, label= "Model 1, 1D terms only") + 
+  labs(tag="(a)") + xlab("") + ylab("")
+
+ggsave(plot=z1, filename = '../results_dec24/mikeanalysis_risk_roads_zoom1D.png', height=5, width=11,dpi = 300) 
+```
+
+
+```{r}
+ggsave(plot=grid.arrange(z1, z2, ncol=2), 
+       filename = '../results_dec24/mikeanalysis_risk_roads_zoom1d2d.jpg', 
+       height=4, width=10,dpi = 300) 
+```
+
+```{r}
+library(viridis)
+plotknots<-kg[salsa2dOutput$bestModel$splineParams[[1]]$knotPos,]
+plotknots$coefsign<-as.factor(ifelse(coef(salsa2dOutput$bestModel)[-c(1:8)]<0, 0, 1))
+plotknots$radii<-salsa2dOutput$bestModel$splineParams[[1]]$radii[salsa2dOutput$bestModel$splineParams[[1]]$radiusIndices]/100
+
+plotknots.sf <- st_as_sf(plotknots %>% mutate(x.posm = x.pos*1000, y.posm = y.pos*1000), coords = c("x.posm", "y.posm"), crs = st_crs(datsf))
+
+modknots<-ggplot() +
+  geom_sf(data=pansutm, fill='lightblue')+
+  geom_sf(data=plotknots.sf,
+             aes(colour=coefsign, size=radii), alpha=1/2) +
+  geom_sf(data=filter(analysisdat.sf, response==1), alpha=1/5, size=0.5) +
+  scale_shape(guide=FALSE)+
+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, colour='black', size=0.3, alpha=0.2) +
+  geom_sf(data=waterholes, colour = 'blue',shape=4) +
+  #geom_sf(data = fencesutm) +
+  scale_size(guide=FALSE) +
+  scale_color_viridis(discrete=TRUE) +
+  guides(colour="none") +
+  labs(tag="(c)" , caption = "Yellow dots = positive coefficient, purple dots = negative coefficient. \nThe size of the coloured dots is proportional to the size of r")
+  
+ggsave(plot=modknots, filename = '../results_dec24/mikeanalysis_salsaknots.png', height=5, width=11,dpi = 300) 
+```
+
+
+```{r}
+riskdat<-analysisdat.sf %>% 
+  filter(response==0) %>%
+  mutate(preds2D_risk = as.factor(ifelse(preds2D>quantile(preds2D, probs=0.95), 1, 0)))
+
+riskrast <- stars::st_rasterize(filter(riskdat, response == 0), dx=2005, dy=2005) %>% 
+  rast
+terra::cellSize(riskrast) 
+# correct names
+names(riskrast) <- names(riskdat)[-which(names(riskdat)%in% c("geometry"))]
+
+roads_risk<-ggplot() +
+  theme_bw() +
+  scale_shape(guide=FALSE)+
+  geom_sf(data=pansutm, fill='lightblue', alpha=0.3) +
+  geom_spatraster(data = riskrast["preds2D_risk"], alpha = 1/3) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_sf(data = roadsutm, colour='black', size=0.3, alpha=0.2) +
+  geom_sf(data=waterholes, colour = 'blue',shape=4) +
+  #geom_sf(data = fencesutm) +
+  scale_fill_viridis_d(direction = -1, name='Risk Areas', na.value = "transparent", na.translate=F) +
+  labs(tag="(b)")
+
+ggsave(plot = roads_risk, filename = '../results_dec24/mikeanalysis_risk_roads_risk_nopoints.png', height=5, width=11,dpi = 300)  
+
+riskroads_points <- roads_risk +
+  geom_sf(data = filter(analysisdat.sf, response==1), shape=1, alpha = 0.2)
+
+ggsave('../results_dec24/mikeanalysis_risk_roads_risk.png', height=5, width=11,dpi = 300)  
+
+```
+
+```{r}
+ggsave(plot=grid.arrange(p2d  +
+  labs(tag="(a)"), roads_risk, ncol=1), 
+       filename = '../results_dec24/mikeanalysis_preds_risk.jpg', 
+       height=8, width=10,dpi = 300) 
+```
+
+```{r}
+require(car)
+anovatab<-Anova(salsa2dOutput$bestModel)
+anovatab$`LR Chisq`
+anovatab$Df
+anovatab$`Pr(>Chisq)`
+```
+
+
+```{r}
+save.image(file="../results_dec24/mikeworkspace.RData")
+```
+
+```{r}
+load(file="../results_dec24/mikeworkspace.RData")
+```
